@@ -161,11 +161,8 @@ def main(bot_token, storefile):
 if __name__ == '__main__':
   import os, sys
   import argparse
-  from nicelogger import enable_pretty_logging
-
-  token = os.environ.pop('TOKEN', None)
-  if not token:
-    sys.exit('Please pass bot token in environment variable TOKEN.')
+  from .lib.nicelogger import enable_pretty_logging, TornadoLogFormatter
+  from .lib.mailerrorlog import LocalSMTPHandler
 
   parser = argparse.ArgumentParser(
     description='A Telegram bot to fight spam and keep group chats unbothered')
@@ -175,7 +172,28 @@ if __name__ == '__main__':
   parser.add_argument('--loglevel', default='info',
                       choices=['debug', 'info', 'warn', 'error'],
                       help='log level')
+  parser.add_argument('--mail-from', metavar='ADDRESS', default='spamfightbot',
+                      help='our mail address')
+  parser.add_argument('--mail-errors-to', metavar='ADDRESS[;ADDRESS]',
+                      help='mail error logs to ADDRESS via local MTA')
   args = parser.parse_args()
 
+  token = os.environ.pop('TOKEN', None)
+  if not token:
+    sys.exit('Please pass bot token in environment variable TOKEN.')
+
   enable_pretty_logging(args.loglevel.upper())
+
+  if args.mail_errors_to:
+    rootlogger = logging.getLogger()
+    handler = LocalSMTPHandler(
+      args.mail_from,
+      args.mail_errors_to.split(';'),
+      tag = 'spamfightbot',
+      min_gap_seconds = 3600,
+    )
+    handler.setLevel(logging.WARNING)
+    handler.setFormatter(TornadoLogFormatter(color=False))
+    rootlogger.addHandler(handler)
+
   main(token, args.storefile)
