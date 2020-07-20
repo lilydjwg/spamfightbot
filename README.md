@@ -19,7 +19,7 @@ join messages will be deleted.
 The disscussion group remains public so links work, and people can see messages
 without joining in.
 
-## Usage
+## How to use the bot
 
 Invite the bot [@spamfightbot](https://t.me/spamfightbot) to a group to be
 protected and set it as an administrator (it needs to delete messages and
@@ -32,7 +32,7 @@ is to be used as the gate and `@group` is the group to be protected.
 Note that the bot may leave by itself if not configured. If you want to disable
 the bot for your group, just remove it.
 
-## Running
+## Run your own instance
 
 Install a recent Python (at least 3.6+) and the `python-telegram-bot` package.
 Then you can see its help message:
