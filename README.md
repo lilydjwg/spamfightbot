@@ -1,4 +1,4 @@
-Another Telegram anti-spam bot without disturbance.
+# Another Telegram anti-spam bot without disturbance.
 
 Note: this bot is still in beta and bugs may appear.
 
