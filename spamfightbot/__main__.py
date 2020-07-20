@@ -76,8 +76,7 @@ class SpamFightBot:
     msg = update.message
     bot = context.bot
 
-    if msg is None:
-      logging.warning('message is None, but why? %r', update)
+    if msg is None: # edited message
       return
 
     if msg.left_chat_member:
