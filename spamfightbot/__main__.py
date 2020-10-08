@@ -37,6 +37,10 @@ class SpamFightBot:
     u = msg.from_user
     logging.debug('newpair msg: %r', msg.text)
 
+    if msg.chat.type in ["group", "supergroup"]:
+      msg.delete()
+      return
+
     reply = self.newpair_impl(bot, msg, u)
     u.send_message(
       text = reply,
@@ -63,7 +67,7 @@ class SpamFightBot:
     if bot.id not in admin_ids:
       return f"Error: I'm not an admin of {group}."
 
-    if front_g.type in ['channel', 'private']:
+    if front_g.type == 'channel':
       try:
         bot.get_chat_administrators(front)
       except telegram.error.BadRequest: # Member list is inaccessible
