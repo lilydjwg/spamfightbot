@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import logging
 import shelve
-import datetime
+import time
 from typing import Union
+import asyncio
 
-import telegram.error
-from telegram.ext import Updater
-from telegram.ext import MessageHandler, Filters
-from telegram.ext import CommandHandler
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import exceptions
 
 NEWPAIR_USAGE = '''\
 Usage: /newpair @front @group
@@ -19,47 +18,62 @@ Users entering @group must be in @front, or get kicked.
 You must be an admin of @group and add me as an admin in it.
 '''
 
-def format_name(user) -> str:
-  l = [user.first_name, user.last_name]
-  return ' '.join(x for x in l if x)
-
 class ChatUnavailable(Exception):
   def __init__(self, chat_id: Union[str, int]) -> None:
     self.chat_id = chat_id
 
 class SpamFightBot:
-  def __init__(self, store):
+  def __init__(self, store, token):
     self.store = store
 
-  def newpair(self, update, context):
-    msg = update.message
-    bot = context.bot
+    bot = Bot(token=token)
+    dp = Dispatcher(bot)
+
+    dp.register_message_handler(
+      self.newpair,
+      commands=['newpair'],
+    )
+
+    dp.register_message_handler(
+      self.on_message,
+      content_types = types.ContentTypes.ANY,
+    )
+
+    self.dp = dp
+    self.bot = bot
+
+  async def newpair(self, msg):
+    bot = self.bot
     u = msg.from_user
     logging.debug('newpair msg: %r', msg.text)
 
     if msg.chat.type in ["group", "supergroup"]:
-      msg.delete()
+      await msg.delete()
       return
 
-    reply = self.newpair_impl(bot, msg, u)
-    u.send_message(
+    reply = await self.newpair_impl(bot, msg, u)
+    await bot.send_message(
+      u.id,
       text = reply,
       reply_to_message_id = msg.message_id,
     )
 
-  def newpair_impl(self, bot, msg, u) -> str:
+  async def newpair_impl(self, bot, msg, u) -> str:
     try:
       _, front, group = msg.text.split()
     except ValueError:
       return NEWPAIR_USAGE
 
     try:
-      front_g = get_chat_or_fail(bot, front)
-      group_g = get_chat_or_fail(bot, group)
+      front_g = await get_chat_or_fail(bot, front)
+      group_g = await get_chat_or_fail(bot, group)
     except ChatUnavailable as e:
       return f'Error: the chat {e.chat_id} does not exist or is unavailable to me.'
 
-    admins = bot.get_chat_administrators(group)
+    if group_g.type not in ['group', 'supergroup']:
+      return f'Error: {group} is not a group.'
+
+    admins = await bot.get_chat_administrators(group)
     admin_ids = [cm.user.id for cm in admins]
     if u.id not in admin_ids:
       return f'Error: you are not an admin of {group}.'
@@ -69,22 +83,19 @@ class SpamFightBot:
 
     if front_g.type == 'channel':
       try:
-        bot.get_chat_administrators(front)
-      except telegram.error.BadRequest: # Member list is inaccessible
+        await bot.get_chat_administrators(front)
+      except exceptions.BadRequest: # Member list is inaccessible
         return f"Error: I'm not an admin of {front_g.type} {front} but I need to be in order to see its members."
 
     self.store[str(group_g.id)] = front_g.id
+    logging.info('new pair: %s and %s', front, group)
     return 'Success!'
 
-  def handle_msg(self, update, context):
-    msg = update.message
-    bot = context.bot
-
-    if msg is None: # edited message
-      return
+  async def on_message(self, msg: types.Message) -> None:
+    bot = self.bot
 
     if msg.left_chat_member:
-      if bot.id == msg.left_chat_member.id:
+      if self.bot_id == msg.left_chat_member.id:
         # I'm removed
         try:
           logging.info('Leaving %s (%d)', msg.chat.title, msg.chat.id)
@@ -92,74 +103,71 @@ class SpamFightBot:
         except KeyError:
           pass
 
-      elif bot.id == msg.from_user.id:
+      elif self.bot_id == msg.from_user.id:
         # I've removed the user
-        bot.delete_message(msg.chat.id, msg.message_id)
+        await bot.delete_message(msg.chat.id, msg.message_id)
 
     for u in msg.new_chat_members:
       if u.is_bot:
         continue
-      logging.info('new user: %s (%d)', format_name(u), u.id)
+      logging.info('new user: %s (%d)', u.full_name, u.id)
 
       group_id = msg.chat.id
       front_id = self.store.get(str(group_id))
       if front_id is None:
         logging.info('Leaving %s (%d)', msg.chat.title, group_id)
-        bot.leave_chat(group_id)
+        await bot.leave_chat(group_id)
         continue
 
       if msg.from_user.id != u.id:
         logging.info(
           '%s joined by %s',
-          format_name(u),
-          format_name(msg.from_user),
+          u.full_name,
+          msg.from_user.full_name,
         )
         continue
 
       try:
-        cm = bot.get_chat_member(front_id, u.id)
+        cm = await bot.get_chat_member(front_id, u.id)
         is_member = cm.status in ['member', 'creator', 'administrator']
         logging.debug('ChatMember %r', cm)
-      except telegram.error.Unauthorized:
+      except exceptions.Unauthorized:
         logging.warning('insuffient permissions for %s for group %s',
                         front_id, msg.chat.title)
         return
-      except telegram.error.BadRequest as e:
+      except exceptions.BadRequest as e:
         logging.warning('get_chat_member error: %r', e)
         is_member = False
 
       if is_member:
-        logging.info('%s joined', format_name(u))
+        logging.info('%s joined', u.full_name)
       else:
-        logging.info('Removed %s', format_name(u))
-        bot.delete_message(msg.chat.id, msg.message_id)
-        bot.kick_chat_member(
+        logging.info('Removed %s', u.full_name)
+        await bot.delete_message(msg.chat.id, msg.message_id)
+        await bot.kick_chat_member(
           msg.chat.id,
           u.id,
-          until_date = datetime.datetime.now() + datetime.timedelta(minutes=1),
+          # python-telegram-bot has changed timezone handling silently,
+          # causing blocking people forever
+          # I've switched to aiogram, but I don't want to be bitten again.
+          until_date = int(time.time() + 60),
         )
 
-def get_chat_or_fail(bot, chat_id):
+  async def run(self) -> None:
+    self.bot_id = (await self.bot.me).id
+    await self.dp.skip_updates()
+    await self.dp.start_polling()
+
+async def get_chat_or_fail(bot: Bot, chat_id: Union[int, str]) -> types.Chat:
   try:
-    return bot.get_chat(chat_id)
-  except (telegram.error.BadRequest, telegram.error.Unauthorized):
+    return await bot.get_chat(chat_id)
+  except (exceptions.BadRequest, exceptions.Unauthorized):
     raise ChatUnavailable(chat_id)
 
-def main(bot_token, storefile):
-  updater = Updater(token=bot_token, use_context=True)
-  dispatcher = updater.dispatcher
-
-  store = shelve.open(storefile)
-  sfbot = SpamFightBot(store)
-
-  handler = CommandHandler('newpair', sfbot.newpair)
-  dispatcher.add_handler(handler)
-
-  handler = MessageHandler(Filters.group, sfbot.handle_msg)
-  dispatcher.add_handler(handler)
-
-  updater.start_polling()
-  # we can't close store because we ended but not working threads
+async def main(bot_token, storefile):
+  with shelve.open(storefile) as store:
+    sfbot = SpamFightBot(store, bot_token)
+    await sfbot.run()
 
 if __name__ == '__main__':
   import os, sys
@@ -199,4 +207,7 @@ if __name__ == '__main__':
     handler.setFormatter(TornadoLogFormatter(color=False))
     rootlogger.addHandler(handler)
 
-  main(token, args.storefile)
+  try:
+    asyncio.run(main(token, args.storefile))
+  except KeyboardInterrupt:
+    pass
