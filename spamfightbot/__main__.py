@@ -121,23 +121,24 @@ class SpamFightBot:
 
       if msg.from_user.id != u.id:
         logging.info(
-          '%s joined by %s',
+          '%s added by %s',
           u.full_name,
           msg.from_user.full_name,
         )
-        continue
-
-      try:
-        cm = await bot.get_chat_member(front_id, u.id)
+        cm = await bot.get_chat_member(group_id, msg.from_user.id)
         is_member = cm.status in ['member', 'creator', 'administrator']
-        logging.debug('ChatMember %r', cm)
-      except exceptions.Unauthorized:
-        logging.warning('insuffient permissions for %s for group %s',
-                        front_id, msg.chat.title)
-        return
-      except exceptions.BadRequest as e:
-        logging.warning('get_chat_member error: %r', e)
-        is_member = False
+      else:
+        try:
+          cm = await bot.get_chat_member(front_id, u.id)
+          is_member = cm.status in ['member', 'creator', 'administrator']
+          logging.debug('ChatMember %r', cm)
+        except exceptions.Unauthorized:
+          logging.warning('insuffient permissions for %s for group %s',
+                          front_id, msg.chat.title)
+          return
+        except exceptions.BadRequest as e:
+          logging.warning('get_chat_member error: %r', e)
+          is_member = False
 
       if is_member:
         logging.info('%s joined', u.full_name)
