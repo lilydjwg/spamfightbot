@@ -48,7 +48,10 @@ class SpamFightBot:
     logging.debug('newpair msg: %r', msg.text)
 
     if msg.chat.type in ["group", "supergroup"]:
-      await msg.delete()
+      try:
+        await msg.delete()
+      except exceptions.MessageCantBeDeleted:
+        pass
       return
 
     reply = await self.newpair_impl(bot, msg, u)
