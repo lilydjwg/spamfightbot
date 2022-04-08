@@ -11,6 +11,8 @@ import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import exceptions
 
+from .lib.expiringdict import ExpiringDict
+
 NEWPAIR_USAGE = '''\
 Usage: /newpair @front @group
 
@@ -25,6 +27,7 @@ class ChatUnavailable(Exception):
 class SpamFightBot:
   def __init__(self, store, token):
     self.store = store
+    self.newuser_msgs = ExpiringDict(300, maxsize=100)
 
     bot = Bot(token=token)
     dp = Dispatcher(bot)
@@ -97,6 +100,12 @@ class SpamFightBot:
   async def on_message(self, msg: types.Message) -> None:
     bot = self.bot
 
+    newuser_msgs = self.newuser_msgs
+    key = msg.from_user.id, msg.chat.id
+    if (known_msgs := newuser_msgs.get(key)) is not None:
+      # save for later deletion if not passed
+      known_msgs.append(msg.message_id)
+
     if msg.left_chat_member:
       if self.bot_id == msg.left_chat_member.id:
         # I'm removed
@@ -109,6 +118,9 @@ class SpamFightBot:
       elif self.bot_id == msg.from_user.id:
         # I've removed the user
         await bot.delete_message(msg.chat.id, msg.message_id)
+
+    if msg.new_chat_members:
+      newuser_msgs.expire()
 
     for u in msg.new_chat_members:
       if u.is_bot:
@@ -131,6 +143,7 @@ class SpamFightBot:
         cm = await bot.get_chat_member(group_id, msg.from_user.id)
         is_member = cm.status in ['member', 'creator', 'administrator']
       else:
+        self.newuser_msgs[key] = []
         try:
           cm = await bot.get_chat_member(front_id, u.id)
           is_member = cm.status in ['member', 'creator', 'administrator']
@@ -145,9 +158,12 @@ class SpamFightBot:
 
       if is_member:
         logging.info('%s joined', u.full_name)
+        try:
+          del newuser_msgs[key]
+        except KeyError:
+          pass
       else:
         logging.info('Removed %s', u.full_name)
-        await bot.delete_message(msg.chat.id, msg.message_id)
         await bot.kick_chat_member(
           msg.chat.id,
           u.id,
@@ -156,6 +172,15 @@ class SpamFightBot:
           # I've switched to aiogram, but I don't want to be bitten again.
           until_date = int(time.time() + 60),
         )
+        await bot.delete_message(msg.chat.id, msg.message_id)
+
+        if msgs := newuser_msgs.pop(key, None):
+          logging.info(
+            'Removing %d messages(s) from %s',
+            len(msgs), u.full_name
+          )
+          for msg_id in msgs:
+            await bot.delete_message(msg.chat.id, msg_id)
 
   async def run(self) -> None:
     self.bot_id = (await self.bot.me).id
