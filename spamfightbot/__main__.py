@@ -28,6 +28,9 @@ class SpamFightBot:
   def __init__(self, store, token):
     self.store = store
     self.newuser_msgs = ExpiringDict(300, maxsize=100)
+    # we banned a member for 60s so in 50s whatever we receive is missed
+    # and shoud be deleted
+    self.just_banned = ExpiringDict(50, maxsize=100)
 
     bot = Bot(token=token)
     dp = Dispatcher(bot)
@@ -100,8 +103,13 @@ class SpamFightBot:
   async def on_message(self, msg: types.Message) -> None:
     bot = self.bot
 
-    newuser_msgs = self.newuser_msgs
     key = msg.from_user.id, msg.chat.id
+    if key in self.just_banned:
+      logging.info('Missed message, deleting: %s', msg.md_text)
+      await bot.delete_message(msg.chat.id, msg.message_id)
+      return
+
+    newuser_msgs = self.newuser_msgs
     if (known_msgs := newuser_msgs.get(key)) is not None:
       # save for later deletion if not passed
       known_msgs.append(msg.message_id)
@@ -163,7 +171,8 @@ class SpamFightBot:
         except KeyError:
           pass
       else:
-        logging.info('Removed %s', u.full_name)
+        logging.info('Removing %s', u.full_name)
+        self.just_banned[key] = True
         await bot.kick_chat_member(
           msg.chat.id,
           u.id,
@@ -174,6 +183,7 @@ class SpamFightBot:
         )
         await bot.delete_message(msg.chat.id, msg.message_id)
 
+        # delete received spam message
         if msgs := newuser_msgs.pop(key, None):
           logging.info(
             'Removing %d messages(s) from %s',
