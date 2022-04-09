@@ -172,6 +172,7 @@ class SpamFightBot:
           pass
       else:
         logging.info('Removing %s', u.full_name)
+        self.just_banned.expire()
         self.just_banned[key] = True
         await bot.kick_chat_member(
           msg.chat.id,
