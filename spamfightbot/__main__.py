@@ -105,7 +105,7 @@ class SpamFightBot:
 
     key = msg.from_user.id, msg.chat.id
     if key in self.just_banned:
-      logging.info('Missed message, deleting: %s', msg.md_text)
+      logging.info('Missed message, deleting: %s', msg.text)
       await bot.delete_message(msg.chat.id, msg.message_id)
       return
 
