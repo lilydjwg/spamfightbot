@@ -103,6 +103,7 @@ class SpamFightBot:
   async def on_message(self, msg: types.Message) -> None:
     bot = self.bot
 
+    self.just_banned.expire()
     key = msg.from_user.id, msg.chat.id
     if key in self.just_banned:
       logging.info('Missed message, deleting: %s', msg.text)
@@ -110,6 +111,8 @@ class SpamFightBot:
       return
 
     newuser_msgs = self.newuser_msgs
+    newuser_msgs.expire()
+
     if (known_msgs := newuser_msgs.get(key)) is not None:
       # save for later deletion if not passed
       known_msgs.append(msg.message_id)
@@ -126,9 +129,6 @@ class SpamFightBot:
       elif self.bot_id == msg.from_user.id:
         # I've removed the user
         await bot.delete_message(msg.chat.id, msg.message_id)
-
-    if msg.new_chat_members:
-      newuser_msgs.expire()
 
     for u in msg.new_chat_members:
       if u.is_bot:
@@ -172,7 +172,6 @@ class SpamFightBot:
           pass
       else:
         logging.info('Removing %s', u.full_name)
-        self.just_banned.expire()
         self.just_banned[key] = True
         await bot.kick_chat_member(
           msg.chat.id,
