@@ -34,7 +34,7 @@ the bot for your group, just remove it.
 
 ## Run your own instance
 
-Install a recent Python (at least 3.6+) and the `python-telegram-bot` package.
+Install a recent Python (at least 3.6+) and the `python-aiogram` package.
 Then you can see its help message:
 
 ```
