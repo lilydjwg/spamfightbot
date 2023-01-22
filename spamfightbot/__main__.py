@@ -161,8 +161,10 @@ class SpamFightBot:
                           front_id, msg.chat.title)
           return
         except exceptions.BadRequest as e:
+          # may be ChatNotFound
           logging.warning('get_chat_member error: %r', e)
-          is_member = False
+          # error treated as open
+          is_member = True
 
       if is_member:
         logging.info('%s joined', u.full_name)
