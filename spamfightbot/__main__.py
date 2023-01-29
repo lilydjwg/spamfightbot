@@ -27,6 +27,7 @@ class ChatUnavailable(Exception):
 class SpamFightBot:
   def __init__(self, store, token):
     self.store = store
+    store['front_groups'] = {g for g in store.values() if isinstance(g, int)}
     self.newuser_msgs = ExpiringDict(300, maxsize=100)
     # we banned a member for 60s so in 50s whatever we receive is missed
     # and shoud be deleted
@@ -96,6 +97,7 @@ class SpamFightBot:
       except exceptions.BadRequest: # Member list is inaccessible
         return f"Error: I'm not an admin of {front_g.type} {front} but I need to be in order to see its members."
 
+    self.store['front_groups'] = {g for g in self.store.values() if isinstance(g, int)}
     self.store[str(group_g.id)] = front_g.id
     logging.info('new pair: %s and %s', front, group)
     return 'Success!'
@@ -121,7 +123,7 @@ class SpamFightBot:
       if self.bot_id == msg.left_chat_member.id:
         # I'm removed
         try:
-          logging.info('Leaving %s (%d)', msg.chat.title, msg.chat.id)
+          logging.info('Leaving %s (%d) (self removed)', msg.chat.title, msg.chat.id)
           del self.store[str(msg.chat.id)]
         except KeyError:
           pass
@@ -138,8 +140,10 @@ class SpamFightBot:
       group_id = msg.chat.id
       front_id = self.store.get(str(group_id))
       if front_id is None:
-        logging.info('Leaving %s (%d)', msg.chat.title, group_id)
-        await bot.leave_chat(group_id)
+        if group_id not in self.store['front_groups']:
+          # leave any unconfigured groups
+          logging.info('Leaving %s (%d) (unconfigured)', msg.chat.title, group_id)
+          await bot.leave_chat(group_id)
         continue
 
       if msg.from_user.id != u.id:
