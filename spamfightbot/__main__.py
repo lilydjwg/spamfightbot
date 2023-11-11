@@ -187,7 +187,11 @@ class SpamFightBot:
           # I've switched to aiogram, but I don't want to be bitten again.
           until_date = int(time.time() + 60),
         )
-        await bot.delete_message(msg.chat.id, msg.message_id)
+        try:
+          await bot.delete_message(msg.chat.id, msg.message_id)
+        except exceptions.MessageToDeleteNotFound:
+          # message deleted by others
+          pass
 
         # delete received spam message
         if msgs := newuser_msgs.pop(key, None):
