@@ -103,6 +103,18 @@ class SpamFightBot:
     return 'Success!'
 
   async def on_message(self, msg: types.Message) -> None:
+    try:
+      await self._on_message_real(msg)
+    except (exceptions.MessageCantBeDeleted, exceptions.NotEnoughRightsToRestrict):
+      logging.info('Leaving %s (%d) (message can\'t be deleted)',
+                   msg.chat.title, msg.chat.id)
+      await self.bot.leave_chat(msg.chat.id)
+      try:
+        del self.store[str(msg.chat.id)]
+      except KeyError:
+        pass
+
+  async def _on_message_real(self, msg: types.Message) -> None:
     bot = self.bot
 
     self.just_banned.expire()
