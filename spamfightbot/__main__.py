@@ -194,7 +194,7 @@ class SpamFightBot:
       else:
         logger.info('Removing %s', u.full_name)
         self.just_banned[key] = True
-        await bot.kick_chat_member(
+        await bot.ban_chat_member(
           msg.chat.id,
           u.id,
           # python-telegram-bot has changed timezone handling silently,
