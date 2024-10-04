@@ -7,11 +7,16 @@ import shelve
 import time
 from typing import Union
 import asyncio
+import json
 
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import exceptions
+from aiogram import Bot, Dispatcher, types, loggers
+from aiogram import exceptions
+from aiogram.filters.command import Command
+from aiogram.utils.serialization import deserialize_telegram_object_to_python
 
 from .lib.expiringdict import ExpiringDict
+
+logger = logging.getLogger(__name__)
 
 NEWPAIR_USAGE = '''\
 Usage: /newpair @front @group
@@ -34,17 +39,10 @@ class SpamFightBot:
     self.just_banned = ExpiringDict(50, maxsize=100)
 
     bot = Bot(token=token)
-    dp = Dispatcher(bot)
+    dp = Dispatcher()
 
-    dp.register_message_handler(
-      self.newpair,
-      commands=['newpair'],
-    )
-
-    dp.register_message_handler(
-      self.on_message,
-      content_types = types.ContentTypes.ANY,
-    )
+    dp.message(Command('newpair'))(self.newpair)
+    dp.message(lambda event: True)(self.on_message)
 
     self.dp = dp
     self.bot = bot
@@ -52,12 +50,12 @@ class SpamFightBot:
   async def newpair(self, msg):
     bot = self.bot
     u = msg.from_user
-    logging.debug('newpair msg: %r', msg.text)
+    logger.debug('newpair msg: %r', msg.text)
 
     if msg.chat.type in ["group", "supergroup"]:
       try:
         await msg.delete()
-      except exceptions.MessageCantBeDeleted:
+      except exceptions.TelegramAPIError:
         pass
       return
 
@@ -94,20 +92,22 @@ class SpamFightBot:
     if front_g.type == 'channel':
       try:
         await bot.get_chat_administrators(front)
-      except exceptions.BadRequest: # Member list is inaccessible
+      except exceptions.TelegramBadRequest: # Member list is inaccessible
         return f"Error: I'm not an admin of {front_g.type} {front} but I need to be in order to see its members."
 
     self.store['front_groups'] = {g for g in self.store.values() if isinstance(g, int)}
     self.store[str(group_g.id)] = front_g.id
-    logging.info('new pair: %s and %s', front, group)
+    logger.info('new pair: %s and %s', front, group)
     return 'Success!'
 
   async def on_message(self, msg: types.Message) -> None:
     try:
+      if logger.isEnabledFor(logging.DEBUG):
+        msg_str = json.dumps(deserialize_telegram_object_to_python(msg), ensure_ascii=False)
+        logger.debug('Message: %s', msg_str)
       await self._on_message_real(msg)
-    except (exceptions.MessageCantBeDeleted, exceptions.NotEnoughRightsToRestrict):
-      logging.info('Leaving %s (%d) (message can\'t be deleted)',
-                   msg.chat.title, msg.chat.id)
+    except exceptions.TelegramAPIError as e:
+      logger.info('Leaving %s (%d) (%r)', msg.chat.title, msg.chat.id, e)
       await self.bot.leave_chat(msg.chat.id)
       try:
         del self.store[str(msg.chat.id)]
@@ -120,7 +120,7 @@ class SpamFightBot:
     self.just_banned.expire()
     key = msg.from_user.id, msg.chat.id
     if key in self.just_banned:
-      logging.info('Missed message, deleting: %s', msg.text)
+      logger.info('Missed message, deleting: %s', msg.text)
       await bot.delete_message(msg.chat.id, msg.message_id)
       return
 
@@ -135,7 +135,7 @@ class SpamFightBot:
       if self.bot_id == msg.left_chat_member.id:
         # I'm removed
         try:
-          logging.info('Leaving %s (%d) (self removed)', msg.chat.title, msg.chat.id)
+          logger.info('Leaving %s (%d) (self removed)', msg.chat.title, msg.chat.id)
           del self.store[str(msg.chat.id)]
         except KeyError:
           pass
@@ -144,22 +144,25 @@ class SpamFightBot:
         # I've removed the user
         await bot.delete_message(msg.chat.id, msg.message_id)
 
+    if not msg.new_chat_members:
+      return
+
     for u in msg.new_chat_members:
       if u.is_bot:
         continue
-      logging.info('new user: %s (%d)', u.full_name, u.id)
+      logger.info('new user: %s (%d)', u.full_name, u.id)
 
       group_id = msg.chat.id
       front_id = self.store.get(str(group_id))
       if front_id is None:
         if group_id not in self.store['front_groups']:
           # leave any unconfigured groups
-          logging.info('Leaving %s (%d) (unconfigured)', msg.chat.title, group_id)
+          logger.info('Leaving %s (%d) (unconfigured)', msg.chat.title, group_id)
           await bot.leave_chat(group_id)
         continue
 
       if msg.from_user.id != u.id:
-        logging.info(
+        logger.info(
           '%s added by %s',
           u.full_name,
           msg.from_user.full_name,
@@ -171,25 +174,25 @@ class SpamFightBot:
         try:
           cm = await bot.get_chat_member(front_id, u.id)
           is_member = cm.status in ['member', 'creator', 'administrator']
-          logging.debug('ChatMember %r', cm)
-        except exceptions.Unauthorized:
-          logging.warning('insuffient permissions for %s for group %s',
+          logger.debug('ChatMember %r', cm)
+        except exceptions.TelegramForbiddenError:
+          logger.warning('insuffient permissions for %s for group %s',
                           front_id, msg.chat.title)
           return
-        except exceptions.BadRequest as e:
-          # may be ChatNotFound
-          logging.warning('get_chat_member error: %r', e)
+        except exceptions.TelegramAPIError as e:
+          # may be chat not found
+          logger.warning('get_chat_member error: %r', e)
           # error treated as open
           is_member = True
 
       if is_member:
-        logging.info('%s joined', u.full_name)
+        logger.info('%s joined', u.full_name)
         try:
           del newuser_msgs[key]
         except KeyError:
           pass
       else:
-        logging.info('Removing %s', u.full_name)
+        logger.info('Removing %s', u.full_name)
         self.just_banned[key] = True
         await bot.kick_chat_member(
           msg.chat.id,
@@ -201,13 +204,13 @@ class SpamFightBot:
         )
         try:
           await bot.delete_message(msg.chat.id, msg.message_id)
-        except exceptions.MessageToDeleteNotFound:
+        except exceptions.TelegramNotFound:
           # message deleted by others
           pass
 
         # delete received spam message
         if msgs := newuser_msgs.pop(key, None):
-          logging.info(
+          logger.info(
             'Removing %d messages(s) from %s',
             len(msgs), u.full_name
           )
@@ -215,14 +218,14 @@ class SpamFightBot:
             await bot.delete_message(msg.chat.id, msg_id)
 
   async def run(self) -> None:
-    self.bot_id = (await self.bot.me).id
-    await self.dp.skip_updates()
-    await self.dp.start_polling()
+    self.bot_id = (await self.bot.me()).id
+    await self.bot.delete_webhook(drop_pending_updates=True)
+    await self.dp.start_polling(self.bot)
 
 async def get_chat_or_fail(bot: Bot, chat_id: Union[int, str]) -> types.Chat:
   try:
     return await bot.get_chat(chat_id)
-  except (exceptions.BadRequest, exceptions.Unauthorized):
+  except exceptions.TelegramAPIError:
     raise ChatUnavailable(chat_id)
 
 async def main(bot_token, storefile):
@@ -255,6 +258,9 @@ if __name__ == '__main__':
     sys.exit('Please pass bot token in environment variable TOKEN.')
 
   enable_pretty_logging(args.loglevel.upper())
+
+  # don't output "Update id=... is handled. Duration 16 ms by bot id=..." messages
+  loggers.event.setLevel(logging.WARNING)
 
   if args.mail_errors_to:
     rootlogger = logging.getLogger()
