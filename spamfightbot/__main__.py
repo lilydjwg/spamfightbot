@@ -269,7 +269,7 @@ if __name__ == '__main__':
       args.mail_from,
       args.mail_errors_to.split(';'),
       tag = 'spamfightbot',
-      min_gap_seconds = 3600,
+      delay = 600,
     )
     handler.setLevel(logging.WARNING)
     handler.setFormatter(TornadoLogFormatter(color=False))
