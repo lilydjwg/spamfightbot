@@ -150,7 +150,7 @@ class SpamFightBot:
     for u in msg.new_chat_members:
       if u.is_bot:
         continue
-      logger.info('new user: %s (%d)', u.full_name, u.id)
+      logger.info('new user: %s (%d) in %s', u.full_name, u.id, msg.chat.title)
 
       group_id = msg.chat.id
       front_id = self.store.get(str(group_id))
@@ -163,8 +163,9 @@ class SpamFightBot:
 
       if msg.from_user.id != u.id:
         logger.info(
-          '%s added by %s',
+          '%s added to %s by %s',
           u.full_name,
+          msg.chat.title,
           msg.from_user.full_name,
         )
         cm = await bot.get_chat_member(group_id, msg.from_user.id)
@@ -186,7 +187,7 @@ class SpamFightBot:
           is_member = True
 
       if is_member:
-        logger.info('%s joined', u.full_name)
+        logger.info('%s joined %s', u.full_name, msg.chat.title)
         try:
           del newuser_msgs[key]
         except KeyError:
