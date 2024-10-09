@@ -1,1 +1,1 @@
-aiogram
+aiogram>=3
