@@ -107,6 +107,10 @@ class SpamFightBot:
         logger.debug('Message: %s', msg_str)
       await self._on_message_real(msg)
     except exceptions.TelegramAPIError as e:
+      if 'not found' in repr(e):
+        # deleted by other users
+        return
+
       logger.info('Leaving %s (%d) (%r)', msg.chat.title, msg.chat.id, e)
       await self.bot.leave_chat(msg.chat.id)
       try:
