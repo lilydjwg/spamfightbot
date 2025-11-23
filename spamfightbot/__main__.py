@@ -106,6 +106,8 @@ class SpamFightBot:
         msg_str = json.dumps(deserialize_telegram_object_to_python(msg), ensure_ascii=False)
         logger.debug('Message: %s', msg_str)
       await self._on_message_real(msg)
+    except exceptions.TelegramNetworkError as e:
+      logger.warning('TelegramNetworkError: %r', e)
     except exceptions.TelegramAPIError as e:
       if 'not found' in repr(e):
         # deleted by other users
