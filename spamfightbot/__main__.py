@@ -179,7 +179,7 @@ class SpamFightBot:
       else:
         self.newuser_msgs[key] = []
         try:
-          cm = await bot.get_chat_member(front_id, u.id)
+          cm = await get_chat_member_retrying(bot, front_id, u.id)
           is_member = cm.status in ['member', 'creator', 'administrator']
           logger.debug('ChatMember %r', cm)
         except exceptions.TelegramForbiddenError:
@@ -188,7 +188,7 @@ class SpamFightBot:
           return
         except exceptions.TelegramAPIError as e:
           # may be chat not found
-          logger.warning('get_chat_member error: %r', e)
+          logger.error('get_chat_member error: %r', e)
           # error treated as open
           is_member = True
 
@@ -234,6 +234,17 @@ async def get_chat_or_fail(bot: Bot, chat_id: Union[int, str]) -> types.Chat:
     return await bot.get_chat(chat_id)
   except exceptions.TelegramAPIError:
     raise ChatUnavailable(chat_id)
+
+async def get_chat_member_retrying(bot: Bot, chat_id: int, uid: int) -> types.ChatMember:
+  for i in range(3):
+    try:
+      return await bot.get_chat_member(chat_id, uid)
+    except exceptions.TelegramNetworkError as e:
+      if i == 2:
+        logger.error('get_chat_member error, giving up: %r', e)
+        raise
+      else:
+        logger.warning('get_chat_member error, retrying: %r', e)
 
 async def main(bot_token, storefile):
   with shelve.open(storefile) as store:
