@@ -29,6 +29,11 @@ administrator too so that it can see its members.
 Then start the bot and use the command `/newpair @front @group` where `@front`
 is to be used as the gate and `@group` is the group to be protected.
 
+You can give it the "can_invite_users" administrator right and it will handle
+join requests based on the same condition. This is useful when the group is
+flooded with join messsages, but these requests won't leave a record in the
+group's log.
+
 Note that the bot may leave by itself if not configured. If you want to disable
 the bot for your group, just remove it.
 

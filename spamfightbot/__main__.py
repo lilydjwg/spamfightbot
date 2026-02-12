@@ -43,6 +43,7 @@ class SpamFightBot:
 
     dp.message(Command('newpair'))(self.newpair)
     dp.message(lambda event: True)(self.on_message)
+    dp.chat_join_request(lambda event: True)(self.on_join_request)
 
     self.dp = dp
     self.bot = bot
@@ -174,14 +175,13 @@ class SpamFightBot:
           msg.chat.title,
           msg.from_user.full_name,
         )
-        cm = await bot.get_chat_member(group_id, msg.from_user.id)
+        cm = await get_chat_member_retrying(bot, group_id, msg.from_user.id)
         is_member = cm.status in ['member', 'creator', 'administrator']
       else:
         self.newuser_msgs[key] = []
         try:
           cm = await get_chat_member_retrying(bot, front_id, u.id)
           is_member = cm.status in ['member', 'creator', 'administrator']
-          logger.debug('ChatMember %r', cm)
         except exceptions.TelegramForbiddenError:
           logger.warning('insuffient permissions for %s for group %s',
                           front_id, msg.chat.title)
@@ -224,6 +224,28 @@ class SpamFightBot:
           for msg_id in msgs:
             await bot.delete_message(msg.chat.id, msg_id)
 
+  async def on_join_request(self, req: types.ChatJoinRequest) -> None:
+    u = req.from_user
+    chat = req.chat
+    logger.info('new join request: %s (%d) in %s',
+                u.full_name, u.id, chat.title)
+
+    front_id = self.store.get(str(chat.id))
+    if front_id is None:
+      logger.warning('Chat has no configured front group: %s (%d)',
+                     chat.title, chat.id)
+      return
+
+    cm = await get_chat_member_retrying(self.bot, front_id, u.id)
+    is_member = cm.status in ['member', 'creator', 'administrator']
+
+    if is_member:
+      logger.info('Approving %s to join %s', u.full_name, chat.title)
+      await req.approve()
+    else:
+      logger.info('Declining %s to join %s', u.full_name, chat.title)
+      await req.decline()
+
   async def run(self) -> None:
     self.bot_id = (await self.bot.me()).id
     await self.bot.delete_webhook(drop_pending_updates=True)
@@ -238,7 +260,9 @@ async def get_chat_or_fail(bot: Bot, chat_id: Union[int, str]) -> types.Chat:
 async def get_chat_member_retrying(bot: Bot, chat_id: int, uid: int) -> types.ChatMember:
   for i in range(3):
     try:
-      return await bot.get_chat_member(chat_id, uid)
+      cm = await bot.get_chat_member(chat_id, uid)
+      logger.debug('ChatMember %r', cm)
+      return cm
     except exceptions.TelegramNetworkError as e:
       if i == 2:
         logger.error('get_chat_member error, giving up: %r', e)
