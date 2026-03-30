@@ -109,6 +109,8 @@ class SpamFightBot:
       await self._on_message_real(msg)
     except exceptions.TelegramNetworkError as e:
       logger.warning('TelegramNetworkError: %r', e)
+    except exceptions.TelegramRetryAfter as e:
+      logger.warning('TelegramRetryAfter: %r', e)
     except exceptions.TelegramAPIError as e:
       if 'not found' in repr(e):
         # deleted by other users
