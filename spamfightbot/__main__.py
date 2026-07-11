@@ -32,7 +32,10 @@ class ChatUnavailable(Exception):
 class SpamFightBot:
   def __init__(self, store, token):
     self.store = store
-    store['front_groups'] = {g for g in store.values() if isinstance(g, int)}
+    old_front_groups = store['front_groups']
+    new_front_groups = {g for g in store.values() if isinstance(g, int)}
+    if new_front_groups != old_front_groups:
+      store['front_groups'] = new_front_groups
     self.newuser_msgs = ExpiringDict(300, maxsize=100)
     # we banned a member for 60s so in 50s whatever we receive is missed
     # and shoud be deleted
