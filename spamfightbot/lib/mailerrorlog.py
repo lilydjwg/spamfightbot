@@ -1,11 +1,10 @@
-from __future__ import annotations
-
 import logging
 from typing import Tuple, Deque
 from collections import deque
 from collections.abc import Sequence
 import threading
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
+import sys
 
 from .mailutils import assemble_mail, sendmail
 
@@ -41,7 +40,14 @@ class LogMailSender(threading.Thread):
 
   def run(self):
     while True:
-      self.run_one()
+      try:
+        self.run_one()
+      except Exception:
+        # unrecoverable error, drop logs and keep the queue running
+        print('Error sending logs via SMTP:', file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        self.deque.clear()
 
   def run_one(self):
     try:
@@ -56,17 +62,14 @@ class LogMailSender(threading.Thread):
       return
 
     subject, body = self.format_as_mail(self.deque)
-    try:
-      mail = assemble_mail(
-        f'[{self.tag}] {subject}',
-        self.toaddrs,
-        self.fromaddr,
-        text = body,
-      )
-      sendmail(mail)
-      self.deque.clear()
-    except Exception:
-      self.handler.handleError(record)
+    mail = assemble_mail(
+      f'[{self.tag}] {subject}',
+      self.toaddrs,
+      self.fromaddr,
+      text = body,
+    )
+    sendmail(mail)
+    self.deque.clear()
 
   def format_as_mail(self, records: Sequence[logging.LogRecord]) -> Tuple[str, str]:
     if len(records) == 1:
@@ -104,4 +107,8 @@ class LocalSMTPHandler(logging.Handler):
     self.worker.start()
 
   def emit(self, record: logging.LogRecord) -> None:
-    self.queue.put(record)
+    try:
+      # don't block indefinitely here even the sender thread dies
+      self.queue.put(record, timeout=0.1)
+    except Full:
+      print('SMTP logs queue full, log lost', file=sys.stderr)
